@@ -9,7 +9,6 @@ import tempfile
 import zipfile
 import geopandas as gpd
 from typing import Dict, Tuple, List, Optional
-import fiona
 
 def map_python_type_to_schema(dtype_str: str) -> str:
     """Mapea el tipo de dato de Pandas/Fiona al tipo esperado por la plantilla ('character', 'numeric', 'integer')."""
@@ -42,12 +41,20 @@ def read_shapefiles_from_directory(directory_path: str, predio_name: str) -> Tup
             gdf = gpd.read_file(shp_path)
             dict_gdfs[base_name] = gdf
 
-            # Leer metadatos de esquema nativos con Fiona (ancho de columna y tipo DBF real)
-            with fiona.open(shp_path) as src:
+            # Intento de lectura de esquema con fiona o fallback nativo de geopandas
+            try:
+                import fiona
+                with fiona.open(shp_path) as src:
+                    dict_meta[base_name] = {
+                        "crs": src.crs,
+                        "schema": src.schema,
+                        "driver": src.driver
+                    }
+            except Exception:
                 dict_meta[base_name] = {
-                    "crs": src.crs,
-                    "schema": src.schema,
-                    "driver": src.driver
+                    "crs": gdf.crs,
+                    "schema": {"properties": {c: str(gdf[c].dtype) for c in gdf.columns if c != 'geometry'}},
+                    "driver": "ESRI Shapefile"
                 }
         except Exception as e:
             print(f"Error al leer shapefile {shp_path}: {e}")
