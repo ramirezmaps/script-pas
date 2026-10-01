@@ -1,0 +1,881 @@
+rm(list=ls())
+graphics.off()
+
+library(sf)
+library(dplyr)
+library(stringr)
+library(crayon)
+library(writexl)
+
+ogrinfo_path <- "C:/Program Files/QGIS 3.44.12/bin/ogrinfo.exe"
+
+### agregar el nombre del predio que se usa en los shapes:
+nombre_predio <- "PARTE_FUNDO_QUELEN"
+### Definir directorio de trabajo
+directorio <- "C:\Users\ignacio.ramirez\OneDrive - SLR Consulting\Escritorio\APRX\SCRIPT\SHP\"
+### Ruta y archivo compilado de áreas de corta, ajusta el nombre si existe una nueva versión
+ruta_shp_area_comp   <- "Z:/Cartografia/CNX919/PROCESADOS/00_BASES/02_COMPILADOS/CNX919_Areas_de_corta_20260807.shp"  
+
+## Revisar las plantilla, que corresponde a cada shape y sus atributos segun protocolo CONAF
+## Para los campos con decimales (sup ha), la longitud tiene un digito mas, al parecer reconoce la coma "," 
+plantillas <- list(
+  "Area" = data.frame(
+    nombre = c("Nom_Predio", "N_Area", "Tipo_Bos", "Sup_ha", "Fuente"),
+    tipo = c("character", "character", "character", "numeric", "character"),
+    longitud = c(NA, 5, 10, 11, NA),
+    decimales = c(NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Limite_Predial" = data.frame(
+    nombre = c("Nom_Predio", "Rol", "Comuna","Sup_ha", "Fuente"),
+    tipo = c("character", "character", "character", "numeric", "character"),
+    longitud = c(NA, 50, 50, 11, NA),
+    decimales = c(NA, NA, NA, 2, NA), stringsAsFactors = FALSE ),
+  
+  "Suelos" = data.frame(
+    nombre = c("Nom_Predio", "Cat_Erosio", "Sup_ha", "Fuente"),
+    tipo = c("character", "character", "numeric", "character"),
+    longitud = c(NA, 2, 11, NA),
+    decimales = c(NA, NA, 2, NA), stringsAsFactors = FALSE ),
+  
+  "Rangos_pend" = data.frame(
+    nombre = c("Nom_Predio", "Ran_Pend", "Sup_ha", "Fuente"),
+    tipo = c("character", "character", "numeric", "character"),
+    longitud = c(NA, 10, 11, NA),
+    decimales = c(NA, NA, 2, NA), stringsAsFactors = FALSE ),
+  
+  "Infra_aislada" = data.frame(
+    nombre = c("Nom_Predio", "Nom_Infra", "Coord_X", "Coord_Y", "Fuente"),
+    tipo = c("character", "character", "integer", "integer","character"),
+    longitud = c(NA, 50, 6, 7, NA),
+    decimales = c(NA, NA, 0, 0, NA), stringsAsFactors = FALSE ),
+  
+  "Parcela" = data.frame(
+    nombre = c("Nom_Predio", "N_Rodal", "N_Parc", "Coord_X", "Coord_Y", "Fuente"),
+    tipo = c("character", "character", "character", "integer", "integer","character"),
+    longitud = c(NA, 5, 5, 6, 7, NA),
+    decimales = c(NA, 0, 0, 0, 0, NA), stringsAsFactors = FALSE ),
+  
+  "Referencia" = data.frame(
+    nombre = c("Nom_Predio", "Nom_Pto", "Coord_X", "Coord_Y", "Fuente"),
+    tipo = c("character", "character", "integer", "integer","character"),
+    longitud = c(NA, 100, 6, 7, NA),
+    decimales = c(NA, NA, 0, 0, NA), stringsAsFactors = FALSE ),
+  
+  "Caminos" = data.frame(
+    nombre = c("Nom_Predio", "Tipo_Cam", "Long_Cam", "Fuente"),
+    tipo = c("character", "character", "numeric","character"),
+    longitud = c(NA, 2, 11, NA),
+    decimales = c(NA, NA, 2, NA), stringsAsFactors = FALSE ),
+  
+  "Curvas_niv" = data.frame(
+    nombre = c("Nom_Predio", "Cot_Curva", "Long_Curva", "Fuente"),
+    tipo = c("character", "integer", "numeric","character"),
+    longitud = c(NA, 9, 11, NA),
+    decimales = c(NA, NA, 2, NA), stringsAsFactors = FALSE ),
+  
+  "Hidrografia" = data.frame(
+    nombre = c("Nom_Predio", "Tip_Dren", "Tipo_Perma", "Long_Dren", "Fuente"),
+    tipo = c("character", "character", "character", "numeric","character"),
+    longitud = c(NA, 2, 2, 11, NA),
+    decimales = c(NA, NA, NA, 2, NA), stringsAsFactors = FALSE ),
+  
+  "Rodales" = data.frame(
+    nombre = c("Nom_Predio", "N_Rodal", "Tipo_Bos", "Tipo_For", "Sup_ha", "Fuente"),
+    tipo = c("character", "character", "character","character", "numeric","character"),
+    longitud = c(NA, 5, 10, 10, 11, NA),
+    decimales = c(NA, NA, NA, NA, 2, NA), stringsAsFactors = FALSE ),
+  
+  "Predios_vecinos" = data.frame(
+    nombre = c("Nom_Predio", "Rol", "Comuna","Sup_ha", "Fuente"),
+    tipo = c("character", "character", "character", "numeric", "character"),
+    longitud = c(NA, 50, 50, 11, NA),
+    decimales = c(NA, NA, NA, 2, NA), stringsAsFactors = FALSE ),
+  
+  "LTE_HVDC" = data.frame(
+    nombre = c("Nom_Predio", "Obra","Nom_obra", "Obra_detal", "Tipo", "Tramo", "Long_LTE", "Fuente"),
+    tipo = c("character", "character", "character", "character", "character",  "character","numeric", "character"),
+    longitud = c(NA, 80,80,80,80,80, 11, NA),
+    decimales = c(NA, NA, NA, NA, NA, NA, 2, NA), stringsAsFactors = FALSE ),
+  
+  "Sendero_peatonal" = data.frame(
+    nombre = c("Nom_Predio","Nom_Send", "Long_Send", "Fuente"),
+    tipo = c("character", "character", "numeric", "character"),
+    longitud = c(NA, 50, 11, NA),
+    decimales = c(NA, NA, 2, NA), stringsAsFactors = FALSE ),
+  
+  "Area_Proyecto"  = data.frame(
+    nombre = c ("Nom_Predio", "Nom_obra" , "Obra_detal" , "Tipo" , "Sup_ha" , "Fuente"),
+    tipo = c ("character", "character" , "character" , "character" , "numeric", "character"), 
+    longitud = c (NA, 80, 80, 50, 11, NA), 
+    decimales = c(NA, NA, NA,NA , 2, NA), stringAsFactors = FALSE) ,
+  
+  "Area_proteccion" = data.frame(
+    nombre = c ("Nom_Predio", "Tipo", "Nombre", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "numeric", "character"), 
+    longitud = c (NA, 100, 100, 11, NA), 
+    decimales = c (NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Limite_Comunal" = data.frame(
+    nombre = c ("Region", "Provincia", "Comuna", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "numeric", "character"), 
+    longitud = c (50, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Servidumbre" = data.frame(
+    nombre = c ("Nom_Predio", "Rol", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "numeric", "character"), 
+    longitud = c (NA, 50, 11, NA), 
+    decimales = c (NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  ### MEDIDAS FAUNA ###############################################################################
+  "Areas_receptoras_ruido" = data.frame(
+    nombre = c ("Nom_Predio", "Nom_obra", "Obra_detal", "Ambiente", "Receptor", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "character","character","numeric", "character"), 
+    longitud = c (NA, 50, 50, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Perturbacion_ruido" = data.frame(
+    nombre = c ("Nom_Predio", "Nom_obra", "Obra_detal", "Ambiente", "Receptor", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "character","character","numeric", "character"), 
+    longitud = c (NA, 50, 50, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Perturbacion_baja_mov" = data.frame(
+    nombre = c ("Nom_Predio", "Nom_obra", "Obra_detal", "Perturbaci", "Ambiente", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "character","character","numeric", "character"), 
+    longitud = c (NA, 50, 50, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Receptoras_baja_mov" = data.frame(
+    nombre = c ("Nom_Predio", "Nom_obra", "Obra_detal", "Perturbaci", "Ambiente", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "character","character","numeric", "character"), 
+    longitud = c (NA, 50, 50, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Perturbacion_curureras" = data.frame(
+    nombre = c ("Nom_Predio", "Obra_detal", "Ambiente", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character","numeric", "character"), 
+    longitud = c (NA, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Receptoras_curureras" = data.frame(
+    nombre = c ("Nom_Predio", "Obra_detal", "Ambiente", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character","numeric", "character"), 
+    longitud = c (NA, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Perchas" = data.frame(
+    nombre = c("Nom_Predio", "Medida", "Coord_X", "Coord_Y", "Fuente"),
+    tipo = c("character", "character", "integer", "integer","character"),
+    longitud = c(NA, 50, 6, 7, NA),
+    decimales = c(NA, NA, 0, 0, NA), stringsAsFactors = FALSE ),
+  
+  "Señaletica_velocidad" = data.frame(
+    nombre = c("Nom_Predio", "Tipo_inst", "Coord_X", "Coord_Y", "Fuente"),
+    tipo = c("character", "character", "integer", "integer","character"),
+    longitud = c(NA, 50, 6, 7, NA),
+    decimales = c(NA, NA, 0, 0, NA), stringsAsFactors = FALSE),
+  
+  ### MEDIDAS PLANTAS SUELO ##########################################################################
+  "Rehabilitacion" = data.frame(
+    nombre = c ("Nom_Predio", "Nom_obra", "Obra_detal", "Medida", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "character","numeric", "character"), 
+    longitud = c (NA, 50, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Surcos" = data.frame(
+    nombre = c ("Nom_Predio", "Medida", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "numeric", "character"), 
+    longitud = c (NA, 50,  11, NA), 
+    decimales = c (NA, NA,  2, NA), stringsAsFactors = FALSE),
+  
+  "Rehabilitacion_pendiente_30" = data.frame(
+    nombre = c ("Nom_Predio", "Nom_obra", "Obra_detal", "Medida", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "character", "numeric", "character"), 
+    longitud = c (NA, 50, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Recoleccion_semillas" = data.frame(
+    nombre = c ("Nom_Predio", "Medida", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "numeric", "character"), 
+    longitud = c (NA, 50,  11, NA), 
+    decimales = c (NA, NA,  2, NA), stringsAsFactors = FALSE),
+  
+  "Sectores_recoleccion_semillas" = data.frame(
+    nombre = c ("Nom_Predio", "Nom_obra", "Obra_detal", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character",  "numeric", "character"), 
+    longitud = c (NA, 10, 10, 11, NA), 
+    decimales = c (NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  ### MEDIDAS PLANTAS ################################################################################
+  "Areas_relocalizacion" = data.frame(
+    nombre = c ("Nom_Predio", "Medida", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "numeric", "character"), 
+    longitud = c (NA, 50, 11, NA), 
+    decimales = c (NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Areas_rescate" = data.frame(
+    nombre = c ("Nom_Predio", "Nom_obra", "Obra_detal", "Especie", "Medida", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "character", "character", "numeric", "character"), 
+    longitud = c (NA, 50, 50, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Reposicion" = data.frame(
+    nombre = c ("Nom_Predio", "Medida", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "numeric", "character"), 
+    longitud = c (NA, 50, 11, NA), 
+    decimales = c (NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  ### REVEGETACION ###################################################################################
+    "Recoleccion_semillas" = data.frame(
+    nombre = c ("Nom_Predio", "Medida", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "numeric", "character"), 
+    longitud = c (NA, 50,  11, NA), 
+    decimales = c (NA, NA,  2, NA), stringsAsFactors = FALSE),
+  
+  "Revegetacion" = data.frame(
+    nombre = c ("Nom_Predio", "Nom_Sitio", "Region", "Provincia", "Comuna", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "character", "character", "numeric", "character"), 
+    longitud = c (NA, NA, 50, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Area_FX_singular" = data.frame(
+    nombre = c ("Nom_Predio", "Nom_obra", "Obra_detal", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "numeric", "character"), 
+    longitud = c (NA, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  ### ENRIQUECIMIENTO #################################################################################
+  "Enriquecimiento" = data.frame(
+    nombre = c ("Nom_Predio", "Nom_Sitio", "Region", "Provincia", "Comuna", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "character", "character", "numeric", "character"), 
+    longitud = c (NA, NA, 50, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  "Areas_ECC" = data.frame(
+    nombre = c ("Nom_Predio", "Nom_obra", "Obra_detal", "Especie", "Sup_ha", "Fuente"),
+    tipo = c ("character", "character", "character", "character", "numeric", "character"), 
+    longitud = c (NA, NA, 50, 50, 11, NA), 
+    decimales = c (NA, NA, NA, NA, 2, NA), stringsAsFactors = FALSE),
+  
+  ### MEDIDAS #########################################################################################
+  "Infra_incendio" = data.frame(
+    nombre = c("Nom_Predio", "Nom_Infra", "Coord_X", "Coord_Y", "Fuente"),
+    tipo = c("character", "character", "integer", "integer","character"),
+    longitud = c(NA, 50, 6, 7, NA),
+    decimales = c(NA, NA, 0, 0, NA), stringsAsFactors = FALSE ),
+  
+  "Obras_conservacion" = data.frame(
+    nombre = c("Nom_Predio", "Nom_Infra", "Coord_X", "Coord_Y", "Fuente"),
+    tipo = c("character", "character", "integer", "integer","character"),
+    longitud = c(NA, 50, 6, 7, NA),
+    decimales = c(NA, NA, 0, 0, NA), stringsAsFactors = FALSE )
+ )
+
+# Atributos según Tabla del protocolo CONAF, revisar y ajustar en caso de ser necesario
+dominios_conaf <- list(
+  "Tipo_Bos" = c("No aplica"), # Bosque nativo y Plantaciones
+  "Tipo_For" = c("No aplica"),  # 1=Alerce, ..., 12=Palma Chilena
+  "Tipo_Cam" = 1:4,   # 1=Principal, 2=Secundario, 3=Regional, 4=Otro
+  "Tip_Dren" = 1:5,   # 1=Rio, 2=Estero, 3=Arroyo, 4=Quebrada, 5=Canal
+  "Tipo_Perma" = 1:2, # 1=Permanente, 2=No permanente
+  "Cat_Erosio" = 1:4,   # 1=Moderada, 2=Severa, 3=Muy severa, 4=Otros
+  "Ran_Pend" = c("0% - 10%","10% - 30%", "30% - 45%", "45% - 60%", "60% y mas")
+) 
+
+## Rescatar los nombres de cada shape de la planilla y le pegamos el prefijo del predio definido
+prefijos <- names(plantillas)
+nombres_shapes <- paste(prefijos, nombre_predio, sep = "_")
+prefijo_por_shape <- setNames(prefijos, nombres_shapes)
+
+## Buscar nombre archivos shapes del directorio, el valor $ permite que no se recaten los archviso .shp.xml u otros
+shapes <- list.files(path = directorio, pattern = "\\.shp$", full.names = TRUE)
+## La capa shape filtrados, deja solo los shapes que coinciden en nombre entre la plantilla y los existentes en la ruta
+shapes_filtrados <- shapes[basename(tools::file_path_sans_ext(shapes)) %in% nombres_shapes]
+
+# Nombres base de los shapes de la ruta v/s los de la planilla
+nombres_en_carpeta <- basename(tools::file_path_sans_ext(shapes))
+esperados <- nombres_shapes
+encontrados <- basename(tools::file_path_sans_ext(shapes_filtrados))
+faltantes <- setdiff(esperados, encontrados) #están en la plantilla pero no en la carpeta setdiff compara los listados devolviendo los que no estan
+adicionales <- setdiff(nombres_en_carpeta, esperados) # están en la carpeta pero no en la lista de esperados
+
+if (length(faltantes) == 0) {
+  cat(bold(green("Estan todos los shapes a entregar \n")))
+} else {
+  cat(bold(red("OJO, FALTAN los shapes:\n")))
+  print(faltantes)
+}
+
+if (length(adicionales) == 0) {
+  cat(bold(green("No hay shapes adicionales fuera de los definidos en la plantilla.\n")))
+} else {
+  cat(bold(red("Hay shapes adicionales en la carpeta que no están en la plantilla:\n")))
+  print(adicionales)
+}
+
+## Creamos una función para detectar si tiene propiedades ZM
+tiene_zm <- function(atrib) {
+  coords <- atrib[7]
+  # Detectar si hay columnas Z o M
+  return(grepl("3D", coords))
+}
+
+# función de validación de dominios segun la tabla, considerando los NA y "" como ERROR
+valida_dominio <- function(valores, dominio) {
+  es_na_o_vacio <- is.na(valores) | valores == ""
+  fuera_dom <- !(valores %in% dominio)
+  invalido <- es_na_o_vacio | fuera_dom
+  list(ok_global = !any(invalido),
+       idx_invalidos = which(invalido)
+  )
+}
+
+## Creamos lista vacía para guardar los resultados.
+resultados_lista <- list()
+
+#########################################################################################################################
+#########################################################################################################################
+#### CILCO DE VALIDACION SEGUN PLANILLA ####
+for (shp in shapes_filtrados) {
+  # shp <- shapes_filtrados[2] # MANTENER DESACTIVADO, USARLO SOLO PARA VER COMO VA ANALISISANDO EL CICLO
+  nombre_shape <- tools::file_path_sans_ext(basename(shp))
+  prefijo_usado <- prefijo_por_shape[[nombre_shape]]
+  plantilla <- plantillas[[prefijo_usado]]
+  cat(bold(black( "Revisando shape:", nombre_shape, "\n")))
+  datos <- st_read(shp, quiet = TRUE) # Generando el shape a validar
+  
+  # Revisar Coordendas
+  crs_shape <- sf::st_crs(datos) # rescatamos el sistema de coordenadas que tiene el shape
+  if (!is.na(crs_shape$epsg) && crs_shape$epsg == 32719) {
+    cat(bold(green(paste0("Coordenadas CORRECTAS (WGS84 / UTM 19S, EPSG:32719) en '", nombre_shape, "'.\n"))))
+  } else {
+    cat(bold(red(paste0("Coordenadas INCORRECTAS en '", nombre_shape, "'. Tiene: ",
+                        ifelse(is.na(crs_shape$epsg), "NA", crs_shape$epsg), "\n"))))
+  }
+  
+  atributos <- st_drop_geometry(datos)  # convertimos nuestro shape a una tabla, al eliminar la geometria
+  campos <- data.frame(nombre = names(atributos), tipo = sapply(atributos, function(x) class(x)[1]), stringsAsFactors = FALSE)
+  
+  # Llamar a ogrinfo para obtener estructura, por lo que entendí, es un ejecutable de GDAL (QGIS)
+  cmd <- paste0("\"", ogrinfo_path, "\" -so -al \"", shp, "\"")
+  salida <- system(cmd, intern = TRUE)
+  
+  if (tiene_zm(salida)) { # Aplicamos la funcion ZM al shape (datos) para validar
+    cat(bold(red(paste0("El shape '", nombre_shape, "' tiene dimensiones Z/M en la geometría. (", salida[7], ")\n"))))
+  } else {
+    cat(bold(green(paste0("El shape '", nombre_shape, "' es 2D (sin dimensiones Z/M). (", salida[7], ")\n"))))
+  }
+  
+  campos_lineas <- salida[grepl("^\\s*\\w+\\s*:\\s*\\w+\\s*\\(\\d+(\\.\\d+)?\\)$", salida)]
+  
+  campos_info <- stringr::str_match(campos_lineas, "^\\s*(\\S+):\\s+(\\S+) \\((\\d+)\\.?((\\d+)?)\\)")
+  
+  info_df <- data.frame(
+    nombre = campos_info[,2],
+    tipo_ogr = campos_info[,3],
+    ancho = as.integer(campos_info[,4]),
+    decimales = as.integer(ifelse(campos_info[,6] == "", 0, campos_info[,6])),
+    stringsAsFactors = FALSE
+  )
+  
+  # Ajustar a los tipos a los indicados en la plantilla para más fácil comparación
+  map_tipos <- function(x) {
+    if (x %in% c("String", "Character")) return("character")
+    if (x %in% c("Integer")) return("integer")
+    if (x %in% c("Real", "Float", "Double")) return("numeric")
+    return(tolower(x))
+  }
+  info_df$tipo_esperado <- sapply(info_df$tipo_ogr, map_tipos)  # Aplicamos la función map tipos a cada linea de datos de los tipos leidos con GDAL
+  
+  resultado <- plantilla %>%
+    left_join(campos, by = "nombre") %>%
+    left_join(info_df, by = "nombre")
+  
+  resultado$Existe_Campo <- ifelse(is.na(resultado$tipo.y), "No", "Sí")
+  resultado$Coincide_Tipo_Campo <- resultado$tipo.x == resultado$tipo.y
+  
+  # Validación del largo de los campos
+  resultado$Longitud_Definida_Correcta <- NA
+  for (i in seq_len(nrow(resultado))) {
+    if (!is.na(resultado$longitud[i]) && !is.na(resultado$ancho[i]) && resultado$Existe_Campo[i] == "Sí") {
+      resultado$Longitud_Definida_Correcta[i] <- resultado$longitud[i] == resultado$ancho[i]
+    }
+  }
+  
+  # Validación de decimales
+  resultado$Decimales_Definidos_Correctos <- NA
+  for (i in seq_len(nrow(resultado))) {
+    if (!is.na(resultado$decimales.x[i]) && !is.na(resultado$decimales.y[i]) && resultado$Existe_Campo[i] == "Sí") {
+      resultado$Decimales_Definidos_Correctos[i] <- resultado$decimales.x[i] == resultado$decimales.y[i]
+    }
+  }
+  
+  # pegar valores en la tabla
+  campos_plantilla <- plantilla$nombre
+  campos_shape <- names(atributos)
+  coincide_orden <- identical(campos_plantilla, campos_shape)
+  resultado$Orden_Correcto <- coincide_orden
+  
+  ## Ajuste de nombres para entender mejor la tabla
+  resultado <- resultado %>%
+    rename(
+      Tipo_Plant = tipo.x,
+      Tipo_Shp = tipo.y,
+      Dec_Plant = decimales.x,
+      Dec_Shp = decimales.y,
+      Coin_Tipo_Campo = Coincide_Tipo_Campo,
+      Long_Plant = longitud,
+      Dec_Correcto = Decimales_Definidos_Correctos,
+      Long_Correcta = Longitud_Definida_Correcta,
+      Long_Shp = ancho
+    ) %>%
+    select( # filtrar solo los campos que queremos, elimando los temporales
+      nombre,
+      Tipo_Plant,
+      Tipo_Shp,
+      Existe_Campo,
+      Coin_Tipo_Campo,
+      Long_Plant,
+      Long_Shp,
+      Long_Correcta,
+      Dec_Plant,
+      Dec_Shp,
+      Dec_Correcto,
+      orden_correcto = Orden_Correcto #everything() agregar esto ultimo si se quiere mantener el restos de los valores de la tabla
+    )
+  
+  print(resultado)
+  if (coincide_orden) {
+    cat(bold(green(paste0("El shape '", nombre_shape, "' tiene el orden CORRECTO \n"))))
+  } else {
+    cat(bold(red(paste0("El shape '", nombre_shape, "' tiene el orden INCORRECTO \n"))))
+    cat(bold(red((paste0(campos_plantilla, collapse = " / ")),"\n",(paste0(campos_shape, collapse = " / ")), "\n")))
+  }
+  
+  # Validación de datos segun el protocolo conaf
+  dominios_ok <- TRUE
+  for (campo in names(dominios_conaf)) {
+    if (campo %in% names(atributos)) {
+      res_dom <- valida_dominio(atributos[[campo]], dominios_conaf[[campo]])
+      if (!res_dom$ok_global) {
+        dominios_ok <- FALSE
+        cat(bold(red("Campo '", campo, "' contiene valores fuera del dominio o vacíos (NA/'')\n")))
+      }
+    }
+  }
+  if (dominios_ok) cat(bold(green("Dominios de atributos OK (sin vacíos ni valores diferentes)\n")))
+  
+  # Verificar Sup_ha vs geometría
+  if ("Sup_ha" %in% names(atributos)) {
+    area_geom <- round(as.numeric(st_area(datos))/10000,2)
+    dif_rel <- abs(area_geom - atributos$Sup_ha)/pmax(area_geom, 1e-6)
+    if (any(dif_rel > 0.01, na.rm = TRUE)) {
+      cat(bold(red("Hay diferencias entre el campo Sup_ha y el área recalcualada\n")))
+    } else {
+      cat(bold(green("No hay diferencias entre Sup_ha con el área recalculada\n")))
+    }    
+  }
+  
+  # Revisar coordenadas
+  if (all(c("Coord_X", "Coord_Y") %in% names(atributos))) {
+    # centroide de cada shape que tiene campos de coordenadas (redondeado a enteros)
+    cent <- st_centroid(datos)
+    coords_cent <- st_coordinates(cent)
+    cent_X <- round(coords_cent[, "X"])  # redondear a entero
+    cent_Y <- round(coords_cent[, "Y"])  # redondear a entero
+    
+    # valores de los campos, asegurando que sean numéricos en caso que esten malos en una primera revisión
+    campo_X <- as.numeric(atributos$Coord_X)
+    campo_Y <- as.numeric(atributos$Coord_Y)
+    coinc_X <- cent_X == campo_X
+    coinc_Y <- cent_Y == campo_Y
+    
+    # error si no coinciden
+    idx_malos <- which(!coinc_X | !coinc_Y)
+    
+    if (length(idx_malos) == 0) {
+      cat(bold(green("Coord_X / Coord_Y coherentes con las coordenadas recalculadas \n")))
+    } else {
+      cat(bold(red("Coord_X / Coord_Y diferentes del centroide calculado o campos vacíos: ", length(idx_malos), "\n")))
+      cat("     Filas (primeros 10):", paste(head(idx_malos, 10), collapse = ", "), "\n")
+    }
+  }
+  
+  # Revisar acentos u otro caracter (agregar donde corresponda)
+  campos_texto <- names(atributos)[sapply(atributos, is.character)]
+  
+  if (length(campos_texto) > 0) {
+    formato_txt <- FALSE
+    doble_esp <- FALSE
+  
+    for (campo_txt in campos_texto) {
+      valores <- atributos[[campo_txt]]
+      
+      # listar los caracteres que se quiera buscar
+      tiene_txt <- grepl("[áéíóúÁÉÍÓÚ'àèìòùÀÈÌÒÙ´`]", valores)
+      idx_invalidos <- which(!is.na(valores) & tiene_txt)
+      
+      if (length(idx_invalidos) > 0) {
+        formato_txt <- TRUE
+        cat(bold(red(
+          paste0("Campo '", campo_txt,
+                 "' contiene caracteres invalidos en las filas: ",
+                 paste(head(idx_invalidos, 10), collapse = ", "),
+                 if (length(idx_invalidos) > 10) " ..." else "", "\n")
+        )))
+      }
+      # Dobles espacios
+      tiene_doble_esp <- grepl("  ", valores)
+      idx_doble_esp <- which(!is.na(valores) & tiene_doble_esp)
+      
+      if (length(idx_doble_esp) > 0) {
+        doble_esp <- TRUE
+        cat(bold(red(
+          paste0("Campo '", campo_txt,
+                 "' contiene dobles espacios en las filas: ",
+                 paste(head(idx_doble_esp, 10), collapse = ", "),
+                 if (length(idx_doble_esp) > 10) " ..." else "", "\n")
+        )))
+      }
+    }
+    
+    if (!formato_txt) {
+      cat(bold(green("No hay caracteres invalidos en los campos de texto del shape \n")))
+    }
+    if (!doble_esp) {
+      cat(bold(green("No hay dobles espacios en campos de texto.\n")))
+    }
+  } else {
+    cat(bold(black("El shape no tiene campos de texto para validar caracteres o dobles espacios.\n")))
+  }
+  
+  geom_valid <- st_is_valid(datos, NA_on_exception = TRUE)
+  invalid_geom <- sum(!geom_valid, na.rm = TRUE)
+  if (invalid_geom > 0) {
+    cat(bold(red(invalid_geom, " geometrías inválidas (self-intersection, etc.)\n\n")))
+  } else {
+    cat(bold(green("Todas las geometrías son válidas\n\n")))
+  }
+  resultados_lista[[nombre_shape]] <- resultado
+}
+
+
+# Compilar y guardar resultados como tabla dat.  Usar separador por espacio en EXCEL
+resultados_df <- bind_rows(resultados_lista, .id = "shape")
+setwd(directorio)
+write_xlsx(resultados_df, paste0("00_Reporte_revision_campos_",nombre_predio,".xlsx"))
+
+#########################################################################################################################
+#########################################################################################################################
+#### VALIDACIONES ESPACIALES ####
+# Shapes a validar ######################################################################################################
+ruta_shp_limPred   <- file.path(directorio, paste0("Limite_Predial_", nombre_predio, ".shp"))
+ruta_shp_aproj <- file.path(directorio, paste0("Area_Proyecto_", nombre_predio, ".shp"))
+ruta_shp_parcela <- file.path(directorio, paste0("Parcela_", nombre_predio, ".shp"))
+ruta_shp_rodales <- file.path(directorio, paste0("Rodales_", nombre_predio, ".shp"))
+ruta_shp_infra  <- file.path(directorio, paste0("Infra_aislada_", nombre_predio, ".shp"))
+ruta_shp_vecinos <- file.path(directorio, paste0("Predios_vecinos_", nombre_predio, ".shp"))
+ruta_shp_area_predio <- file.path(directorio, paste0("Area_", nombre_predio, ".shp"))
+ruta_shp_referencia <- file.path(directorio, paste0("Referencia_", nombre_predio, ".shp"))
+
+#########################################################################################################################
+# Buscar "IDs" duplicados en algunos de los shapes en las capas: Rodales, Areas, Referencia y Parcelas
+shp_area_predio <- st_read(ruta_shp_area_predio, quiet = TRUE)
+shp_parcela <- st_read(ruta_shp_parcela, quiet = TRUE) 
+shp_rodales <- st_read(ruta_shp_rodales, quiet = TRUE)
+shp_referencia <- st_read(ruta_shp_referencia, quiet= TRUE)
+
+# Rev de duplicado Areas de corta
+L1 <- length(shp_area_predio$N_Area)
+L2 <- length(unique(shp_area_predio$N_Area))
+L3 <- length(shp_area_predio$N_Area[duplicated(shp_area_predio$N_Area)])
+
+if (L1 == L2 && L3 == 0) {
+  cat(bold(green(("No hay duplicados en el campo Nom_Pto de la capa: "), paste0("Area_", nombre_predio, ".shp"))), "\n")
+} else {
+  Duplicado <- shp_area_predio[duplicated(shp_area_predio$N_Area),]
+  cat(bold(red("Hay un valor duplicado en la capa de Areas de corta: ", Duplicado$N_Area)))
+}
+
+# Rev de duplicado Puntos de Referencia
+L1 <- length(shp_referencia$Nom_Pto)
+L2 <- length(unique(shp_referencia$Nom_Pto))
+L3 <- length(shp_referencia$Nom_Pto[duplicated(shp_referencia$Nom_Pto)])
+
+if (L1 == L2 && L3 == 0) {
+  cat(bold(green(("No hay duplicados en el campo Nom_Pto de la capa: "), paste0("Referencia_", nombre_predio, ".shp"))), "\n")
+} else {
+  Duplicado <- shp_referencia[duplicated(shp_referencia$Nom_Pto),]
+  cat(bold(red("Hay un valor duplicado en la capa de Puntos de referencia: ", Duplicado$Nom_Pto)))
+}
+
+# Rev de duplicado Parcelas
+L1 <- length(shp_parcela$N_Parc)
+L2 <- length(unique(shp_parcela$N_Parc))
+L3 <- length(shp_parcela$N_Parc[duplicated(shp_parcela$N_Parc)])
+
+if (L1 == L2 && L3 == 0) {
+  cat(bold(green(("No hay duplicados en el campo N_Parc de la capa: "), paste0("Parcela_", nombre_predio, ".shp"))), "\n")
+} else {
+  Duplicado <- shp_parcela[duplicated(shp_parcela$N_Parc),]
+  cat(bold(red("Hay un valor duplicado en la capa de Parcelas: ", Duplicado$Nom_Pto)))
+}
+
+shp_rodales["campo_validar"] <- paste0(shp_rodales$Nom_Predio, " / ", shp_rodales$N_Rodal)
+
+# Rev de duplicado Rodales
+L1 <- length(shp_rodales$campo_validar)
+L2 <- length(unique(shp_rodales$campo_validar))
+L3 <- length(shp_rodales$campo_validar[duplicated(shp_rodales$campo_validar)])
+
+if (L1 == L2 && L3 == 0) {
+  cat(bold(green(("No hay duplicados en la capa: "), paste0("Rodales_", nombre_predio, ".shp"))), "\n")
+} else {
+  Duplicado <- shp_rodales[duplicated(shp_rodales$campo_validar),]
+  cat(bold(red("Hay un valor duplicado en la capa de rodales: ", "Predio / Rodal: ", Duplicado$campo_validar)))
+}
+
+#########################################################################################################################
+## Revisar área de corta contra áreas de corta compiladas
+if (file.exists(ruta_shp_area_predio) && file.exists(ruta_shp_area_comp)) {
+  cat(bold(black("Validando que la área de corta del predio no se traslape con el compilado de áreas de corta \n")))
+  
+  shp_area_predio <- st_read(ruta_shp_area_predio, quiet = TRUE)
+  shp_area_comp   <- st_read(ruta_shp_area_comp, quiet = TRUE)
+  
+  # Intersección geométrica
+  inter_areas_corta <- suppressWarnings(st_intersection(shp_area_predio, shp_area_comp))
+  
+  if (nrow(inter_areas_corta) == 0) {
+    cat(bold(green("  No hay intersección entre Area del predio y las áreas de corta compiladas.\n")))
+  } else {
+    inter_areas_corta$area_int <- as.numeric(st_area(inter_areas_corta))
+    
+    # Tolerancia para excluir solo contacto de borde
+    tol_area <- 1e-4
+    inter_areas_corta_real <- inter_areas_corta[inter_areas_corta$area_int > tol_area, ]
+    
+    if (nrow(inter_areas_corta_real) == 0) {
+      cat(bold(green("  Solo hay contacto en el borde (sin traslape con área) entre Area del predio y las áreas de corta compiladas.\n")))
+    } else {
+      n_pol   <- nrow(inter_areas_corta_real)
+      sup_m2  <- sum(inter_areas_corta_real$area_int, na.rm = TRUE)
+      sup_ha  <- round(sup_m2 / 10000, 2)
+      
+      cat(bold(red(
+        paste0("Hay traslape entre las áreas del predio y las áreas de corta compiladas: ",
+               n_pol, " polígonos, superficie total ",
+               round(sup_m2, 1), " m² (", sup_ha, " ha).\n")
+      )))
+      
+      detalle <- st_drop_geometry(inter_areas_corta_real)
+      detalle_sel <- detalle %>%
+        dplyr::select(
+          starts_with("N_Area.1"),
+          starts_with("Provincia"),
+          starts_with("PAS"),
+          starts_with("EXP"),
+          starts_with("Rev"),
+          starts_with("area_int")
+        ) %>%
+        rename(
+          N_Area = N_Area.1,
+          Sup_m2 = area_int
+        )
+      
+      detalle_sel$Sup_m2 <- round(detalle_sel$Sup_m2, 1)
+      print(head(detalle_sel, 10))
+    }
+  }
+} else {
+  if (!file.exists(ruta_shp_area_predio)) {
+    cat(bold(red("No se encontró el shapefile Area de corta del predio para validar traslape\n")))
+  }
+  if (!file.exists(ruta_shp_area_comp)) {
+    cat(bold(red("No se encontró el shapefile compilado de áreas de corta en la ruta indicada.\n")))
+  }
+}
+
+###########################################################################################################################
+## Parcelas dentro de Rodales_BN y N_Rodal consistente 
+if (file.exists(ruta_shp_parcela) && file.exists(ruta_shp_rodales)) {
+  cat(bold(black("Validando consistencia entre Parcelas y Rodales \n")))
+  shp_parcela <- st_read(ruta_shp_parcela, quiet = TRUE) # Convierte a objeto "shape" lo señalado en la ruta anteriormente
+  shp_rodales <- st_read(ruta_shp_rodales, quiet = TRUE)
+  
+  # Para cada parcela, buscar rodal que la contiene
+  idx <- st_within((shp_parcela), (shp_rodales))
+  
+  # Parcelas fuera de todo rodal
+  sin_rodal <- lengths(idx) == 0
+  if (any(sin_rodal)) {
+    cat(bold(red("Parcelas fuera de rodales: ")), sum(sin_rodal), "\n")
+  } else {
+    cat(bold(green("Todas las parcelas están dentro de algún rodal\n")))
+  }
+  
+  # Comparar N_Rodal de parcela vs N_rodal del shape de Rodales
+  coinc_N <- rep(NA, nrow(shp_parcela))
+  for (i in seq_len(nrow(shp_parcela))) {
+    if (!sin_rodal[i]) {
+      id_rod <- idx[[i]][1]
+      coinc_N[i] <- shp_parcela$N_Rodal[i] == shp_rodales$N_Rodal[id_rod]
+    }
+  }
+  if (any(!coinc_N[!is.na(coinc_N)])) {
+    cat(bold(red("Hay parcelas donde N_Rodal no coincide con el numero de rodal\n")))
+  } else {
+    cat(bold(green("N_Rodal en parcelas coincide con N_Rodal de rodales\n")))
+  }
+}
+
+###########################################################################################################################
+## AreaS de corta, Suelos y Rangos de pendiente contenidos en Limite Predial y Area de Proyecto
+capas_a_chequear <- c("Area", "Suelos", "Rangos_pend")  # Capas a revisar y a incluir en el ciclo
+
+if (file.exists(ruta_shp_limPred) && file.exists(ruta_shp_aproj)) {
+  cat(bold(black("Validando Area / Suelos / Rangos_pend vs Limite Predial y Area de Proyecto...\n")))
+  
+  shp_limPred   <- st_read(ruta_shp_limPred, quiet = TRUE)
+  shp_aproj <- st_read(ruta_shp_aproj, quiet = TRUE)
+  
+  # Tolerancia de área para considerar “fuera” en metros cuadrados
+  tol_area <- 0.005
+  
+  for (capa in capas_a_chequear) {
+    shp_file <- file.path(directorio, paste0(capa, "_", nombre_predio, ".shp"))
+    cat(bold(black(" - Capa:", capa, "\n")))
+    shp_capa <- st_read(shp_file, quiet = TRUE)
+    
+    # Parte de la capa que queda fuera del predio
+    fuera_lim <- suppressWarnings(st_difference((shp_capa), st_union((shp_limPred))))
+    if (is.null(fuera_lim) || nrow(fuera_lim) == 0) {
+      cat(bold(green("Sin superficie fuera de Limite_Predial\n")))
+    } else {
+      # calcular área total que queda fuera
+      area_fuera_lim <- sum(as.numeric(st_area(fuera_lim)), na.rm = TRUE)
+      if (area_fuera_lim <= tol_area) {
+        cat(bold(green("Sin áreas fuera respecto a Limite_Predial (", round(area_fuera_lim, 3), " m²)\n")))
+      } else {
+        cat(bold(red("Sperficie fuera de Limite_Predial: ")), round(area_fuera_lim, 1), " m² (", round(area_fuera_lim/10000, 2)," ha) \n")
+      }
+    }
+    
+    # Contra Area de Proyecto
+    fuera_aproj <- suppressWarnings(st_difference((shp_capa), st_union((shp_aproj))))
+    if (is.null(fuera_aproj) || nrow(fuera_aproj) == 0) {
+      cat(bold(green("Sin superficie fuera respecto del Area de Proyecto\n")))
+    } else {
+      area_fuera_aproj <- sum(as.numeric(st_area(fuera_aproj)), na.rm = TRUE)
+      if (area_fuera_aproj <= tol_area) {
+        cat(bold(green("Sin áreas fuera respecto a Area del Proyecto (", round(area_fuera_aproj, 3), " m2)\n")))
+      } else {
+        cat(bold(red("Superficie fuera de Area_Proyecto: ")), round(area_fuera_aproj, 1), " m² (", round(area_fuera_aproj/10000, 2)," ha) \n")
+      }
+    }
+  }
+}
+
+###########################################################################################################################
+## Verificar si Predios vecinos se traslapan con el Limite Predial
+if (file.exists(ruta_shp_limPred) && file.exists(ruta_shp_vecinos)) {
+  cat(bold(black("Validando Predios_vecinos vs Limite_Predial\n")))
+  
+  shp_limPred <- st_read(ruta_shp_limPred, quiet = TRUE)
+  shp_vecinos <- st_read(ruta_shp_vecinos, quiet = TRUE)
+  
+  inter <- suppressWarnings(st_intersection((shp_vecinos), (shp_limPred)))
+  
+  if (nrow(inter) == 0) {
+    cat(bold(green("Predios_vecinos no se traslapan con Limite_Predial\n")))
+  } else {
+    # calcular área de la intersección
+    inter$area_int <- as.numeric(st_area(inter))
+    # tolerancia pequeña para descartar contacto solo en borde/línea
+    tol_area <- 1e-4   # en unidades del CRS (m² si está en UTM)
+    
+    inter_con_area <- inter[inter$area_int > tol_area, ]
+    
+    if (nrow(inter_con_area) == 0) {
+      cat(bold(green("Solo hay contacto en el borde (sin traslape con área)\n")))
+    } else {
+      cat(bold(red("Hay traslape entre Predios_vecinos y Limite_Predial\n")))
+    }
+  }
+}
+
+## Validando que "Infra_aislada" no esté sobre el Area_Proyecto
+if (file.exists(ruta_shp_infra) && file.exists(ruta_shp_aproj)) {
+  cat(bold(black("Validando que Infra_aislada (Control de erosion) NO esté sobre Area_Proyecto...\n")))
+  
+  shp_infra  <- st_read(ruta_shp_infra, quiet = TRUE)
+  shp_aproj  <- st_read(ruta_shp_aproj, quiet = TRUE)
+  
+  categorias_rev <- c(
+    "Control de erosion",
+    "Sacos de tierra",
+    "Bordo de piedra",
+    "Zanja infiltracion",
+    "Empalizada",
+    "Fajina",
+    "Microterraza"
+  )
+  
+  shp_rev <- shp_infra[shp_infra$Nom_Infra %in% categorias_rev, ]
+  
+  if (nrow(shp_rev) == 0) {
+    cat(bold(black("No hay elementos de las categorías a revisar en Infra_aislada\n")))
+  } else {
+    inter <- st_intersects(shp_rev, shp_aproj, sparse = FALSE)
+    en_aproj <- apply(inter, 1, any)
+    
+    if (!any(en_aproj)) {
+      cat(bold(green("Ningún elemento de las categorías revisadas se ubica sobre el Area_Proyecto\n")))
+    } else {
+      cat(bold(red("Hay elementos de las categorías revisadas sobre el Area_Proyecto\n")))
+      
+      filas_orig <- which(shp_infra$Nom_Infra %in% categorias_rev)[which(en_aproj)]
+      
+      cat("   Filas afectadas en Infra_aislada (indice tabla atributos):",
+          paste(filas_orig, collapse = ", "), "\n")
+      
+      cat("   Categorías afectadas:\n")
+      print(unique(shp_rev$Nom_Infra[en_aproj]))
+    }
+  }
+}
+
+###########################################################################################################################
+## Verificar que Nom_Predio sea consistente con el nombre del Limite_Predial en todas las capas
+if (file.exists(ruta_shp_limPred)) {
+  cat(bold(black("Validando nombre de predio en todas las capas\n")))
+  
+  shp_lim <- st_read(ruta_shp_limPred, quiet = TRUE) # Lectura del shapefile
+  nom_vals <- shp_lim$Nom_Predio 
+  nom_vals <- nom_vals[!is.na(nom_vals) & nom_vals != ""] # Rescatamos el nombre del predio y validar si existe
+  if (length(nom_vals) == 0) {
+    cat(bold(red("No se pudo determinar Nom_Predio de referencia en Limite_Predial\n"))) 
+  } else {
+    nom_ref <- names(sort(table(nom_vals), decreasing = TRUE))[1] # Rescatamos el nombre del predio para comparar
+    cat("   Nom_Predio de referencia:", nom_ref, "\n")
+    bases <- basename(tools::file_path_sans_ext(shapes))
+    capas_nom <- setdiff(bases, paste0("Predios_vecinos_", nombre_predio)) # revisar todas las de la plantilla excepto Predios_vecinos, usar c("a", "b") si se quiere sumar otra capa
+    
+    # Ciclo para revisar el "nom_ref" en todas las capas de "capas_nom"
+    for (capa in capas_nom) {
+      shp_file <- file.path(directorio, paste0(capa, ".shp"))
+      shp_cap <- st_read(shp_file, quiet = TRUE)
+      vals <- shp_cap$Nom_Predio
+      idx_malos <- which(is.na(vals) | vals == "" | vals != nom_ref)
+      
+      if (length(idx_malos) == 0) {
+        cat(bold(green("Capa ", capa, ": coincide el nombre del Predio \n")))
+      } else {
+        cat(bold(red("Capa ", capa, ": Nombre del Predio es distinto o vacío en filas: ",
+                     paste(idx_malos, collapse = ", "), "\n")))
+      }
+    }
+  }
+}
+

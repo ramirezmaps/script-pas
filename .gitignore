@@ -1,0 +1,26 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Output reports & temporary spatial files
+*.xlsx
+*.zip
+*.log
+ERROR_*.shp
+ERROR_*.dbf
+ERROR_*.prj
+ERROR_*.shx
