@@ -236,8 +236,12 @@ if st.session_state.get("analysis_done", False):
                 return "background-color: #FCE4D6; color: #C65911; font-weight: bold;"
             return ""
 
+        styler = filtered_logs.style
+        style_func = getattr(styler, "map", getattr(styler, "applymap", None))
+        styled_df = style_func(color_tipo, subset=["tipo"]) if style_func else filtered_logs
+
         st.dataframe(
-            filtered_logs.style.applymap(color_tipo, subset=["tipo"]),
+            styled_df,
             use_container_width=True,
             height=450
         )
